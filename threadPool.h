@@ -14,7 +14,28 @@ class ThreadPool {
 public:
     ThreadPool() = default;
 
-    explicit ThreadPool(size_t threadNum = 8);
+    //explicit ThreadPool(size_t threadNum = 8);
+    explicit ThreadPool(size_t threadCount = 8): pool_(std::make_shared<Pool>()) {
+            assert(threadCount > 0);
+            for(size_t i = 0; i < threadCount; i++) {
+                std::thread([pool = pool_, i] {
+                    std::unique_lock<std::mutex> locker(pool->mtx);
+                    std::cout << "thread id : " << i << std::endl;
+                    while(true) {
+                        if(!pool->tasks.empty()) {
+                            auto task = std::move(pool->tasks.front());
+                            pool->tasks.pop();
+                            locker.unlock();
+                            task();
+                            locker.lock();
+                        } 
+                        else if(pool->isClosed) break;
+                        else pool->cond.wait(locker);
+                    }
+                }).detach();
+            }
+    }
+
 
     ~ThreadPool();
 
@@ -30,31 +51,6 @@ private:
 
     std::shared_ptr<Pool> pool_;//通过智能指针统一管理资源
 };
-
-template <typename T>
-ThreadPool<T>::ThreadPool(size_t threadNum) : pool_(std::make_shared<Pool>()) {//类外定义不需要注明explicit
-    assert(threadNum > 0);
-
-    for (size_t i = 0; i < threadNum; ++i) {
-        std::thread([pool = pool_, i] {
-            std::unique_lock<std::mutex> locker(pool->mtx);//直接上锁
-            std::cout << "thread id : " << i << std::endl;
-            while (true) {
-                if (pool->tasks.empty()) {
-                    auto task = std::move(pool->tasks.front());
-                    pool->tasks.pop();
-                    locker.unlock();//关锁
-                    task();
-                    locker.lock();//unique_lock在离开作用域时可以由其其构函数自动解锁
-                } else if (pool->isClosed) {
-                    break;
-                } else {
-                    pool->cond.wait(locker);
-                }
-            }
-        }).detach();
-    }
-}
 
 template <typename T>
 ThreadPool<T>::~ThreadPool() {
